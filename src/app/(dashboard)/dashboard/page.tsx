@@ -5,15 +5,20 @@ import { createClient } from "@/lib/supabase/client";
 import { InvoiceTable, type Invoice } from "@/components/invoice-table";
 import { ScanButton } from "@/components/scan-button";
 import { ConnectGmailButton } from "@/components/connect-gmail-button";
+import { AddInvoiceDialog } from "@/components/add-invoice-dialog";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { FileText, DollarSign, Calendar, Mail } from "lucide-react";
-import { toast } from "sonner";
+import {
+  FileText,
+  DollarSign,
+  CheckCircle2,
+  AlertCircle,
+  Mail,
+} from "lucide-react";
 
 export default function DashboardPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -25,7 +30,7 @@ export default function DashboardPage() {
     const { data, error } = await supabase
       .from("invoices")
       .select("*")
-      .order("invoice_date", { ascending: false });
+      .order("created_at", { ascending: false });
 
     if (error) {
       console.error("Error fetching invoices:", error);
@@ -48,41 +53,13 @@ export default function DashboardPage() {
     );
   }, [fetchInvoices, checkEmailAccount]);
 
-  async function handleDelete(id: string) {
-    const { error } = await supabase
-      .from("invoices")
-      .delete()
-      .eq("id", id);
-
-    if (error) {
-      toast.error("Failed to delete invoice");
-    } else {
-      setInvoices((prev) => prev.filter((inv) => inv.id !== id));
-    }
-  }
-
-  async function handleDownload(id: string) {
-    const invoice = invoices.find((inv) => inv.id === id);
-    if (!invoice?.pdf_path) return;
-
-    const { data, error } = await supabase.storage
-      .from("invoices")
-      .createSignedUrl(invoice.pdf_path, 60);
-
-    if (error || !data?.signedUrl) {
-      toast.error("Failed to generate download link");
-      return;
-    }
-
-    window.open(data.signedUrl, "_blank");
-  }
-
   const totalAmount = invoices
     .filter((inv) => inv.amount !== null)
     .reduce((sum, inv) => sum + (inv.amount ?? 0), 0);
 
-  const processedCount = invoices.filter(
-    (inv) => inv.status === "processed"
+  const addedCount = invoices.filter((inv) => inv.status === "added").length;
+  const needsPdfCount = invoices.filter(
+    (inv) => inv.status === "needs_pdf"
   ).length;
 
   if (loading) {
@@ -103,18 +80,15 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <AddInvoiceDialog onComplete={fetchInvoices} />
           {!hasEmailAccount && <ConnectGmailButton />}
           {hasEmailAccount && (
-            <ScanButton
-              onComplete={() => {
-                fetchInvoices();
-              }}
-            />
+            <ScanButton onComplete={fetchInvoices} />
           )}
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">
@@ -135,7 +109,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {new Intl.NumberFormat("en-US", {
+              {new Intl.NumberFormat("fr-FR", {
                 style: "currency",
                 currency: "EUR",
               }).format(totalAmount)}
@@ -144,17 +118,26 @@ export default function DashboardPage() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Processed</CardTitle>
-            <Calendar className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Added</CardTitle>
+            <CheckCircle2 className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{processedCount}</div>
+            <div className="text-2xl font-bold">{addedCount}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Needs PDF</CardTitle>
+            <AlertCircle className="h-4 w-4 text-yellow-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{needsPdfCount}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">
-              Connected Emails
+              Connected Email
             </CardTitle>
             <Mail className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -166,11 +149,7 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <InvoiceTable
-        data={invoices}
-        onDelete={handleDelete}
-        onDownload={handleDownload}
-      />
+      <InvoiceTable invoices={invoices} onRefresh={fetchInvoices} />
     </div>
   );
 }

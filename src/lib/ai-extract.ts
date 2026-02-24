@@ -61,3 +61,49 @@ Return ONLY the JSON object, no explanation or markdown.`,
     return { provider: "Unknown", amount: null, currency: "EUR", invoiceDate: null };
   }
 }
+
+export async function extractFromEmailBody(
+  emailBodyText: string,
+  emailSubject: string,
+  providerName: string
+): Promise<ExtractedInvoiceData> {
+  const anthropic = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  });
+
+  const message = await anthropic.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 1024,
+    messages: [
+      {
+        role: "user",
+        content: `You are an invoice data extraction assistant. Extract billing information from this email notification about an invoice/receipt/payment.
+
+Return ONLY a valid JSON object with these fields:
+- "provider": string (the company/service name. Hint: likely "${providerName}")
+- "amount": number or null (the total amount charged, as a decimal number without currency symbol)
+- "currency": string (3-letter currency code like "EUR", "USD", "GBP". Default to "EUR" if unclear)
+- "invoiceDate": string or null (the invoice/billing date in YYYY-MM-DD format)
+
+Email subject: ${emailSubject}
+
+Email body:
+${emailBodyText.slice(0, 4000)}
+
+Return ONLY the JSON object, no explanation or markdown.`,
+      },
+    ],
+  });
+
+  const content = message.content[0];
+  if (content.type !== "text") {
+    return { provider: providerName, amount: null, currency: "EUR", invoiceDate: null };
+  }
+
+  try {
+    const cleaned = content.text.replace(/```json\n?|\n?```/g, "").trim();
+    return JSON.parse(cleaned);
+  } catch {
+    return { provider: providerName, amount: null, currency: "EUR", invoiceDate: null };
+  }
+}

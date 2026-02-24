@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { ConnectGmailButton } from "@/components/connect-gmail-button";
+import { ProviderManager } from "@/components/provider-manager";
 import {
   Card,
   CardContent,
@@ -65,7 +66,7 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
         <p className="text-muted-foreground">
-          Manage your connected email accounts
+          Manage your email accounts and invoice providers
         </p>
       </div>
 
@@ -128,6 +129,8 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      <ProviderManager />
     </div>
   );
 }

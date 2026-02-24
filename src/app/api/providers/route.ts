@@ -13,10 +13,10 @@ export async function GET() {
     }
 
     const { data, error } = await supabase
-      .from("invoices")
+      .from("providers")
       .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+      .or(`is_default.eq.true,user_id.eq.${user.id}`)
+      .order("name");
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -43,25 +43,27 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { provider, amount, currency, invoice_date, invoice_url } = body;
+    const { name, sender_email, invoice_url, logo_url } = body;
 
-    if (!provider) {
+    if (!name || !sender_email) {
       return NextResponse.json(
-        { error: "Provider name is required" },
+        { error: "Name and sender email are required" },
         { status: 400 }
       );
     }
 
+    const search_query = `from:${sender_email} subject:(receipt OR invoice OR payment OR facture)`;
+
     const { data, error } = await supabase
-      .from("invoices")
+      .from("providers")
       .insert({
         user_id: user.id,
-        provider,
-        amount: amount || null,
-        currency: currency || "EUR",
-        invoice_date: invoice_date || null,
+        name,
+        sender_email,
         invoice_url: invoice_url || null,
-        status: "needs_pdf",
+        logo_url: logo_url || null,
+        search_query,
+        is_default: false,
       })
       .select()
       .single();

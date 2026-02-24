@@ -6,7 +6,6 @@ import {
   getEmailWithAttachments,
   downloadAttachment,
 } from "@/lib/gmail";
-import { INVOICE_PROVIDERS } from "@/lib/providers";
 
 export const maxDuration = 60;
 
@@ -34,13 +33,23 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json().catch(() => ({}));
-    const providerIndex =
-      typeof body.providerIndex === "number" ? body.providerIndex : null;
+    const providerId = body.providerId as string | undefined;
 
-    const providers =
-      providerIndex !== null && providerIndex < INVOICE_PROVIDERS.length
-        ? [INVOICE_PROVIDERS[providerIndex]]
-        : INVOICE_PROVIDERS;
+    let providers;
+    if (providerId) {
+      const { data } = await supabase
+        .from("providers")
+        .select("*")
+        .eq("id", providerId)
+        .single();
+      providers = data ? [data] : [];
+    } else {
+      const { data } = await supabase
+        .from("providers")
+        .select("*")
+        .or(`is_default.eq.true,user_id.eq.${user.id}`);
+      providers = data || [];
+    }
 
     let totalProcessed = 0;
     const errors: string[] = [];
@@ -55,7 +64,7 @@ export async function POST(request: Request) {
         try {
           const messages = await searchEmails(
             gmail,
-            provider.searchQuery,
+            provider.search_query,
             5
           );
 
@@ -77,16 +86,29 @@ export async function POST(request: Request) {
                 msg.id
               );
 
-              if (emailData.attachments.length === 0) continue;
+              const hasPdfAttachment = emailData.attachments.length > 0;
 
-              for (const attachment of emailData.attachments) {
+              let invoiceData = {
+                provider: provider.name,
+                amount: null as number | null,
+                currency: "EUR",
+                invoiceDate: null as string | null,
+              };
+
+              let storagePath: string | null = null;
+              let pdfFilename: string | null = null;
+
+              if (hasPdfAttachment) {
+                const attachment = emailData.attachments[0];
                 const pdfBuffer = await downloadAttachment(
                   gmail,
                   msg.id,
                   attachment.attachmentId
                 );
 
-                const storagePath = `${user.id}/${msg.id}/${attachment.filename}`;
+                storagePath = `${user.id}/${msg.id}/${attachment.filename}`;
+                pdfFilename = attachment.filename;
+
                 const { error: uploadError } = await supabase.storage
                   .from("invoices")
                   .upload(storagePath, pdfBuffer, {
@@ -96,15 +118,9 @@ export async function POST(request: Request) {
 
                 if (uploadError) {
                   console.error("Upload error:", uploadError);
-                  continue;
+                  storagePath = null;
+                  pdfFilename = null;
                 }
-
-                let invoiceData = {
-                  provider: provider.name,
-                  amount: null as number | null,
-                  currency: "EUR",
-                  invoiceDate: null as string | null,
-                };
 
                 try {
                   const { extractTextFromPdf, extractInvoiceData } =
@@ -115,36 +131,56 @@ export async function POST(request: Request) {
                     emailData.subject
                   );
                 } catch (extractErr) {
-                  console.error("AI extraction error:", extractErr);
+                  console.error("PDF extraction error:", extractErr);
                 }
-
-                const { error: insertError } = await supabase
-                  .from("invoices")
-                  .insert({
-                    user_id: user.id,
-                    email_account_id: account.id,
-                    provider: invoiceData.provider || provider.name,
-                    amount: invoiceData.amount,
-                    currency: invoiceData.currency || "EUR",
-                    invoice_date: invoiceData.invoiceDate,
-                    pdf_path: storagePath,
-                    pdf_filename: attachment.filename,
-                    email_subject: emailData.subject,
-                    email_date: emailData.date
-                      ? new Date(emailData.date).toISOString()
-                      : null,
-                    gmail_message_id: msg.id,
-                    status: invoiceData.amount ? "processed" : "pending",
-                  });
-
-                if (insertError) {
-                  console.error("Insert error:", insertError);
-                  errors.push(
-                    `Failed to save invoice from ${provider.name}`
+              } else if (emailData.bodyText) {
+                try {
+                  const { extractFromEmailBody } = await import(
+                    "@/lib/ai-extract"
                   );
-                } else {
-                  totalProcessed++;
+                  invoiceData = await extractFromEmailBody(
+                    emailData.bodyText,
+                    emailData.subject,
+                    provider.name
+                  );
+                } catch (extractErr) {
+                  console.error("Email body extraction error:", extractErr);
                 }
+              }
+
+              const status = hasPdfAttachment && storagePath
+                ? invoiceData.amount
+                  ? "processed"
+                  : "pending"
+                : "needs_pdf";
+
+              const { error: insertError } = await supabase
+                .from("invoices")
+                .insert({
+                  user_id: user.id,
+                  email_account_id: account.id,
+                  provider: invoiceData.provider || provider.name,
+                  amount: invoiceData.amount,
+                  currency: invoiceData.currency || "EUR",
+                  invoice_date: invoiceData.invoiceDate,
+                  pdf_path: storagePath,
+                  pdf_filename: pdfFilename,
+                  email_subject: emailData.subject,
+                  email_date: emailData.date
+                    ? new Date(emailData.date).toISOString()
+                    : null,
+                  gmail_message_id: msg.id,
+                  invoice_url: provider.invoice_url,
+                  status,
+                });
+
+              if (insertError) {
+                console.error("Insert error:", insertError);
+                errors.push(
+                  `Failed to save invoice from ${provider.name}`
+                );
+              } else {
+                totalProcessed++;
               }
             } catch (emailErr) {
               console.error(

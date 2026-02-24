@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { RefreshCw } from "lucide-react";
+import { Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
-import { INVOICE_PROVIDERS } from "@/lib/providers";
+import type { InvoiceProvider } from "@/lib/providers";
 
 interface ScanButtonProps {
   onComplete: () => void;
@@ -13,52 +13,59 @@ interface ScanButtonProps {
 export function ScanButton({ onComplete }: ScanButtonProps) {
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState("");
+  const [providers, setProviders] = useState<InvoiceProvider[]>([]);
+
+  useEffect(() => {
+    fetch("/api/providers")
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setProviders)
+      .catch(() => setProviders([]));
+  }, []);
 
   async function handleScan() {
     setScanning(true);
-    let totalFound = 0;
+    let totalProcessed = 0;
 
     try {
-      for (let i = 0; i < INVOICE_PROVIDERS.length; i++) {
-        const provider = INVOICE_PROVIDERS[i];
-        setProgress(`${provider.name} (${i + 1}/${INVOICE_PROVIDERS.length})`);
+      for (let i = 0; i < providers.length; i++) {
+        const provider = providers[i];
+        setProgress(`Scanning ${provider.name} (${i + 1}/${providers.length})`);
 
         try {
           const res = await fetch("/api/gmail/scan", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ providerIndex: i }),
+            body: JSON.stringify({ providerId: provider.id }),
           });
 
-          if (!res.ok) {
-            const text = await res.text();
-            let errorMsg: string;
-            try {
-              errorMsg = JSON.parse(text).error || `Error scanning ${provider.name}`;
-            } catch {
-              errorMsg = `Error scanning ${provider.name} (${res.status})`;
-            }
-            console.error(errorMsg);
+          let data;
+          const text = await res.text();
+          try {
+            data = JSON.parse(text);
+          } catch {
+            console.error("Non-JSON response from scan:", text);
             continue;
           }
 
-          const data = await res.json();
-          totalFound += data.processed || 0;
+          if (data.processed) {
+            totalProcessed += data.processed;
+          }
         } catch (err) {
-          console.error(`Failed to scan ${provider.name}:`, err);
+          console.error(`Error scanning ${provider.name}:`, err);
         }
       }
 
-      if (totalFound > 0) {
-        toast.success(`Scan complete! Found ${totalFound} new invoice(s).`);
+      if (totalProcessed > 0) {
+        toast.success(
+          `Found ${totalProcessed} new invoice${totalProcessed > 1 ? "s" : ""}`
+        );
       } else {
-        toast.info("Scan complete. No new invoices found.");
+        toast.info("No new invoices found");
       }
+
       onComplete();
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Failed to scan inbox"
-      );
+    } catch {
+      toast.error("Scan failed unexpectedly");
     } finally {
       setScanning(false);
       setProgress("");
@@ -67,14 +74,17 @@ export function ScanButton({ onComplete }: ScanButtonProps) {
 
   return (
     <Button onClick={handleScan} disabled={scanning}>
-      <RefreshCw
-        className={`mr-2 h-4 w-4 ${scanning ? "animate-spin" : ""}`}
-      />
-      {scanning
-        ? progress
-          ? `Scanning ${progress}`
-          : "Scanning..."
-        : "Scan for Invoices"}
+      {scanning ? (
+        <>
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          {progress || "Scanning..."}
+        </>
+      ) : (
+        <>
+          <Search className="mr-2 h-4 w-4" />
+          Scan for Invoices
+        </>
+      )}
     </Button>
   );
 }

@@ -99,7 +99,23 @@ export async function getEmailWithAttachments(
 
   findAttachments(msg.data.payload?.parts);
 
-  return { messageId, subject, date, attachments };
+  let bodyText = "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function extractBodyText(parts: any[] | undefined, payload: any) {
+    if (payload?.body?.data && payload?.mimeType === "text/plain") {
+      bodyText += Buffer.from(payload.body.data, "base64url").toString("utf-8");
+    }
+    if (!parts) return;
+    for (const part of parts) {
+      if (part.mimeType === "text/plain" && part.body?.data) {
+        bodyText += Buffer.from(part.body.data, "base64url").toString("utf-8");
+      }
+      if (part.parts) extractBodyText(part.parts, part);
+    }
+  }
+  extractBodyText(msg.data.payload?.parts, msg.data.payload);
+
+  return { messageId, subject, date, attachments, bodyText };
 }
 
 export async function downloadAttachment(
