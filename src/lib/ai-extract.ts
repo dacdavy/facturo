@@ -1,9 +1,4 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { PDFParse } from "pdf-parse";
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
 
 export interface ExtractedInvoiceData {
   provider: string;
@@ -15,6 +10,7 @@ export interface ExtractedInvoiceData {
 export async function extractTextFromPdf(
   pdfBuffer: Buffer
 ): Promise<string> {
+  const { PDFParse } = await import("pdf-parse");
   const parser = new PDFParse({ data: new Uint8Array(pdfBuffer) });
   const result = await parser.getText();
   await parser.destroy();
@@ -25,6 +21,10 @@ export async function extractInvoiceData(
   pdfText: string,
   emailSubject: string
 ): Promise<ExtractedInvoiceData> {
+  const anthropic = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  });
+
   const message = await anthropic.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: 1024,
