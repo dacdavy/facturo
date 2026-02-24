@@ -47,6 +47,15 @@ export function ScanButton({ onComplete }: ScanButtonProps) {
             continue;
           }
 
+          if (data.error === "RECONNECT_REQUIRED") {
+            toast.error(
+              "Gmail connection expired. Please go to Settings, disconnect Gmail, and reconnect it.",
+              { duration: 8000 }
+            );
+            onComplete();
+            return;
+          }
+
           if (data.processed) {
             totalProcessed += data.processed;
           }

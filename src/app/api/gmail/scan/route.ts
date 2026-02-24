@@ -65,7 +65,7 @@ export async function POST(request: Request) {
           const messages = await searchEmails(
             gmail,
             provider.search_query,
-            5
+            10
           );
 
           for (const msg of messages) {
@@ -189,11 +189,31 @@ export async function POST(request: Request) {
               );
             }
           }
-        } catch (searchErr) {
+        } catch (searchErr: unknown) {
+          const errMsg =
+            searchErr instanceof Error ? searchErr.message : String(searchErr);
           console.error(
             `Error searching for ${provider.name}:`,
             searchErr
           );
+
+          if (
+            errMsg.includes("insufficient authentication scopes") ||
+            errMsg.includes("Insufficient Permission") ||
+            errMsg.includes("invalid_grant") ||
+            errMsg.includes("Token has been expired or revoked")
+          ) {
+            return NextResponse.json(
+              {
+                error: "RECONNECT_REQUIRED",
+                message:
+                  "Your Gmail connection has expired or lacks permissions. Please disconnect and reconnect Gmail in Settings.",
+                processed: totalProcessed,
+              },
+              { status: 403 }
+            );
+          }
+
           errors.push(`Failed to search ${provider.name}`);
         }
       }
